@@ -70,3 +70,42 @@ def update_last_crawled(source_id):
             conn.commit()
     finally:
         conn.close()
+        
+def get_article_url(article_id: int) -> str:
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT url FROM articles WHERE id = %s", (article_id,))
+            row = cur.fetchone()
+            return row[0] if row else ""
+    finally:
+        conn.close()
+
+def get_article_region(article_id: int) -> str:
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT s.region FROM articles a
+                JOIN sources s ON a.source_id = s.id
+                WHERE a.id = %s
+            """, (article_id,))
+            row = cur.fetchone()
+            return row[0] if row else ""
+    finally:
+        conn.close()
+
+def get_article_source(article_id: int) -> str:
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT s.name FROM articles a
+                JOIN sources s ON a.source_id = s.id
+                WHERE a.id = %s
+            """, (article_id,))
+            row = cur.fetchone()
+            return row[0] if row else ""
+    finally:
+        conn.close()
+

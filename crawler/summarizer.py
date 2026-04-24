@@ -1,6 +1,8 @@
 import time
 from db import get_connection
 from llm_processor import process_article
+from slack_notifier import notify_article, notify_summary
+
 
 def get_unprocessed_articles(limit=10):
     """未処理記事を取得"""
@@ -68,12 +70,13 @@ def save_summary(article_id, result):
         conn.close()
 
 def summarize_all(limit=10):
-    """未処理記事をまとめてLLM処理"""
     articles = get_unprocessed_articles(limit)
     print(f"[INFO] 未処理記事: {len(articles)}件")
 
     success = 0
     failed = 0
+    new_critical = 0
+    new_high = 0
 
     for article in articles:
         print(f"[INFO] 処理中: {article['title'][:60]}...")
@@ -82,14 +85,32 @@ def summarize_all(limit=10):
             save_summary(article["id"], result)
             success += 1
             print(f"[OK] severity={result.get('severity')} tags={result.get('tags')}")
-            # Gemini無料枠のレート制限対策（1分15リクエストまで）
+
+            # CriticalとHighはSlackに通知
+            severity = result.get("severity")
+            if severity in ("critical", "high"):
+                notify_article({
+                    "title":      article["title"],
+                    "url":        get_article_url(article["id"]),
+                    "region":     get_article_region(article["id"]),
+                    "source_name":get_article_source(article["id"]),
+                    "severity":   severity,
+                    "cve_ids":    result.get("cve_ids", []),
+                    "cvss_score": None,
+                    "tags":       result.get("tags", []),
+                    "summary_ja": result.get("summary_ja"),
+                })
+                if severity == "critical":
+                    new_critical += 1
+                else:
+                    new_high += 1
+
             time.sleep(4)
         except Exception as e:
             failed += 1
             print(f"[ERROR] article_id={article['id']}: {e}")
             time.sleep(5)
 
+    notify_summary(new_critical, new_high)
     print(f"[完了] 成功={success} 失敗={failed}")
 
-if __name__ == "__main__":
-    summarize_all(limit=10)
