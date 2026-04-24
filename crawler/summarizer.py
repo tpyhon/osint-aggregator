@@ -2,6 +2,8 @@ import time
 from db import get_connection
 from llm_processor import process_article
 from slack_notifier import notify_article, notify_summary
+from db import get_active_sources, save_article, save_crawl_log, update_last_crawled, get_article_url, get_article_region, get_article_source
+
 
 
 def get_unprocessed_articles(limit=10):
@@ -12,9 +14,7 @@ def get_unprocessed_articles(limit=10):
             cur.execute("""
                 SELECT a.id, a.title, a.body_raw, a.language
                 FROM articles a
-                LEFT JOIN summaries s ON a.id = s.article_id
                 WHERE a.is_processed = FALSE
-                  AND s.article_id IS NULL
                 ORDER BY a.published_at DESC
                 LIMIT %s
             """, (limit,))
@@ -22,6 +22,7 @@ def get_unprocessed_articles(limit=10):
             return [dict(zip(columns, row)) for row in cur.fetchall()]
     finally:
         conn.close()
+
 
 def save_summary(article_id, result):
     """LLM処理結果をsummariesとarticle_tagsに保存"""
@@ -76,7 +77,7 @@ def summarize_all(limit=10):
     success = 0
     failed = 0
     new_critical = 0
-    new_high = 0
+    
 
     for article in articles:
         print(f"[INFO] 処理中: {article['title'][:60]}...")
@@ -88,7 +89,7 @@ def summarize_all(limit=10):
 
             # CriticalとHighはSlackに通知
             severity = result.get("severity")
-            if severity in ("critical", "high"):
+            if severity == "critical":
                 notify_article({
                     "title":      article["title"],
                     "url":        get_article_url(article["id"]),
@@ -100,10 +101,8 @@ def summarize_all(limit=10):
                     "tags":       result.get("tags", []),
                     "summary_ja": result.get("summary_ja"),
                 })
-                if severity == "critical":
-                    new_critical += 1
-                else:
-                    new_high += 1
+                new_critical += 1
+                
 
             time.sleep(4)
         except Exception as e:
@@ -111,6 +110,6 @@ def summarize_all(limit=10):
             print(f"[ERROR] article_id={article['id']}: {e}")
             time.sleep(5)
 
-    notify_summary(new_critical, new_high)
+    notify_summary(new_critical)
     print(f"[完了] 成功={success} 失敗={failed}")
 
