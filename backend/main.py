@@ -262,3 +262,77 @@ def export_article_to_notion(article_id: int):
             return {"status": "error"}
     finally:
         conn.close()
+        
+@app.get("/search")
+def search_articles(
+    q:    str = Query(..., min_length=1),
+    page: int = Query(1, ge=1),
+    limit:int = Query(20, ge=1, le=100),
+):
+    offset = (page - 1) * limit
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            search = f"%{q}%"
+
+            cur.execute("""
+                SELECT COUNT(DISTINCT a.id)
+                FROM articles a
+                LEFT JOIN summaries s ON a.id = s.article_id
+                JOIN sources s_src ON a.source_id = s_src.id
+                WHERE
+                    a.title ILIKE %s
+                    OR s.summary_ja ILIKE %s
+                    OR %s = ANY(s.cve_ids)
+            """, (search, search, q.upper()))
+            total = cur.fetchone()[0]
+
+            cur.execute("""
+                SELECT
+                    a.id,
+                    a.title,
+                    a.url,
+                    a.published_at,
+                    a.language,
+                    a.is_processed,
+                    a.is_bookmarked,
+                    s_src.name   AS source_name,
+                    s_src.region AS region,
+                    s.summary_ja,
+                    s.severity,
+                    s.cve_ids,
+                    s.cvss_score,
+                    ARRAY_AGG(DISTINCT t.slug) FILTER (WHERE t.slug IS NOT NULL) AS tags
+                FROM articles a
+                LEFT JOIN summaries s ON a.id = s.article_id
+                JOIN sources s_src ON a.source_id = s_src.id
+                LEFT JOIN article_tags at ON a.id = at.article_id
+                LEFT JOIN tags t ON at.tag_id = t.id
+                WHERE
+                    a.title ILIKE %s
+                    OR s.summary_ja ILIKE %s
+                    OR %s = ANY(s.cve_ids)
+                GROUP BY
+                    a.id, a.title, a.url, a.published_at, a.language,
+                    a.is_processed, a.is_bookmarked,
+                    s_src.name, s_src.region,
+                    s.summary_ja, s.severity, s.cve_ids, s.cvss_score
+                ORDER BY a.published_at DESC
+                LIMIT %s OFFSET %s
+            """, (search, search, q.upper(), limit, offset))
+
+            columns = [desc[0] for desc in cur.description]
+            rows = [dict(zip(columns, row)) for row in cur.fetchall()]
+            for row in rows:
+                if row.get("published_at"):
+                    row["published_at"] = row["published_at"].isoformat()
+
+            return {
+                "total": total,
+                "page": page,
+                "limit": limit,
+                "articles": rows,
+            }
+    finally:
+        conn.close()
+
