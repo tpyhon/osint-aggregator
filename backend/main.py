@@ -2,6 +2,10 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 from db import get_connection
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'crawler'))
+from notion_exporter import export_to_notion
 
 app = FastAPI(title="OSINT Aggregator API")
 
@@ -215,5 +219,46 @@ def get_bookmarks():
                 if row.get("published_at"):
                     row["published_at"] = row["published_at"].isoformat()
             return rows
+    finally:
+        conn.close()
+
+@app.post("/articles/{article_id}/export-notion")
+def export_article_to_notion(article_id: int):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    a.id, a.title, a.url, a.published_at,
+                    a.is_processed, a.is_bookmarked,
+                    s_src.name AS source_name,
+                    s_src.region AS region,
+                    s.summary_ja, s.severity, s.cve_ids,
+                    ARRAY_AGG(DISTINCT t.slug) FILTER (WHERE t.slug IS NOT NULL) AS tags
+                FROM articles a
+                LEFT JOIN summaries s ON a.id = s.article_id
+                JOIN sources s_src ON a.source_id = s_src.id
+                LEFT JOIN article_tags at ON a.id = at.article_id
+                LEFT JOIN tags t ON at.tag_id = t.id
+                WHERE a.id = %s
+                GROUP BY
+                    a.id, a.title, a.url, a.published_at,
+                    a.is_processed, a.is_bookmarked,
+                    s_src.name, s_src.region,
+                    s.summary_ja, s.severity, s.cve_ids
+            """, (article_id,))
+            columns = [desc[0] for desc in cur.description]
+            row = cur.fetchone()
+            if not row:
+                return {"error": "記事が見つかりません"}
+            article = dict(zip(columns, row))
+            if article.get("published_at"):
+                article["published_at"] = article["published_at"].isoformat()
+
+        success = export_to_notion(article)
+        if success:
+            return {"status": "ok"}
+        else:
+            return {"status": "error"}
     finally:
         conn.close()
