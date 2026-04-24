@@ -1,0 +1,17 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Node
+frontend/node_modules/
+frontend/.next/
+
+# DB データ（実データは管理しない）
+db/data/
+
+# OS
+.DS_Store
+Thumbs.db

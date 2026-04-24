@@ -1,0 +1,14 @@
+services:
+  db:
+    image: postgres:16
+    container_name: osint-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: osint
+      POSTGRES_USER: osint_user
+      POSTGRES_PASSWORD: osint_pass
+    ports:
+      - "5433:5432"  # Nextcloudと被らないよう5433を使用
+    volumes:
+      - ./db/data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d
