@@ -77,21 +77,21 @@ osint-aggregator/
 
 ### 手順
 
-**1. リポジトリをクローン**
-
+1. リポジトリをクローン**
 ```bash
 git clone https://github.com/tpyhon/osint-aggregator.git
 cd osint-aggregator
+
 2. DBを起動
-
 Copydocker compose up -d
-3. Python環境を構築
 
+3. Python環境を構築
 Copypython3.11 -m venv venv
 venv\Scripts\activate
 pip install -r crawler/requirements.txt
 pip install -r backend/requirements.txt
 pip install google-genai notion-client
+
 4. 環境変数を設定
 
 crawler/.envを作成します。
@@ -105,6 +105,7 @@ GEMINI_API_KEY=your_api_key
 SLACK_WEBHOOK_URL=your_webhook_url
 NOTION_API_KEY=your_notion_key
 NOTION_DATABASE_ID=your_database_id
+
 backend/.envを作成します。
 
 CopyDB_HOST=localhost
@@ -114,17 +115,17 @@ DB_USER=osint_user
 DB_PASSWORD=osint_pass
 NOTION_API_KEY=your_notion_key
 NOTION_DATABASE_ID=your_database_id
-5. クローラーを実行
 
+5. クローラーを実行
 Copycd crawler
 python main.py
 python summarize_all.py
-6. バックエンドを起動
 
+6. バックエンドを起動
 Copycd backend
 uvicorn main:app --reload --port 8000
-7. フロントエンドを起動
 
+7. フロントエンドを起動
 Copycd frontend
 npm install
 npm run dev
@@ -133,6 +134,7 @@ http://localhost:3000にアクセスします。
 自動実行（Windowsタスクスケジューラ）
 run_crawler.bat：12時間ごとに実行（クローラー＋古い記事削除）
 run_summarizer.bat：クローラーの30分後に実行（LLM要約処理）
+
 情報ソース
 ソース	種別	地域
 JVN	脆弱性	国内
