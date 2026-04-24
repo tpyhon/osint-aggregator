@@ -77,8 +77,8 @@ osint-aggregator/
 
 ### 手順
 
-1. リポジトリをクローン**
 ```bash
+1. リポジトリをクローン
 git clone https://github.com/tpyhon/osint-aggregator.git
 cd osint-aggregator
 
