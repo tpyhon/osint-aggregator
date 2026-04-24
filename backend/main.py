@@ -66,6 +66,7 @@ def get_articles(
                     a.published_at,
                     a.language,
                     a.is_processed,
+                    a.is_bookmarked,
                     s_src.name   AS source_name,
                     s_src.region AS region,
                     s.summary_ja,
@@ -80,7 +81,7 @@ def get_articles(
                 LEFT JOIN tags t ON at.tag_id = t.id
                 {where}
                 GROUP BY
-                    a.id, a.title, a.url, a.published_at, a.language, a.is_processed,
+                    a.id, a.title, a.url, a.published_at, a.language, a.is_processed, a.is_bookmarked,
                     s_src.name, s_src.region,
                     s.summary_ja, s.severity, s.cve_ids, s.cvss_score
                 ORDER BY a.published_at DESC
@@ -102,7 +103,6 @@ def get_articles(
             }
     finally:
         conn.close()
-
 
 
 @app.get("/tags")
@@ -159,5 +159,61 @@ def get_stats():
                 "unprocessed": total_articles - processed,
                 "severity_counts": severity_counts,
             }
+    finally:
+        conn.close()
+
+
+@app.post("/articles/{article_id}/bookmark")
+def toggle_bookmark(article_id: int):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE articles
+                SET is_bookmarked = NOT is_bookmarked
+                WHERE id = %s
+                RETURNING is_bookmarked
+            """, (article_id,))
+            result = cur.fetchone()
+            conn.commit()
+            if not result:
+                return {"error": "記事が見つかりません"}
+            return {"is_bookmarked": result[0]}
+    finally:
+        conn.close()
+
+
+@app.get("/bookmarks")
+def get_bookmarks():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    a.id, a.title, a.url, a.published_at,
+                    a.is_processed,
+                    a.is_bookmarked,
+                    s_src.name AS source_name,
+                    s_src.region AS region,
+                    s.summary_ja, s.severity, s.cve_ids, s.cvss_score,
+                    ARRAY_AGG(DISTINCT t.slug) FILTER (WHERE t.slug IS NOT NULL) AS tags
+                FROM articles a
+                LEFT JOIN summaries s ON a.id = s.article_id
+                JOIN sources s_src ON a.source_id = s_src.id
+                LEFT JOIN article_tags at ON a.id = at.article_id
+                LEFT JOIN tags t ON at.tag_id = t.id
+                WHERE a.is_bookmarked = TRUE
+                GROUP BY
+                    a.id, a.title, a.url, a.published_at, a.is_processed, a.is_bookmarked,
+                    s_src.name, s_src.region,
+                    s.summary_ja, s.severity, s.cve_ids, s.cvss_score
+                ORDER BY a.published_at DESC
+            """)
+            columns = [desc[0] for desc in cur.description]
+            rows = [dict(zip(columns, row)) for row in cur.fetchall()]
+            for row in rows:
+                if row.get("published_at"):
+                    row["published_at"] = row["published_at"].isoformat()
+            return rows
     finally:
         conn.close()
