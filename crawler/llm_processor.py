@@ -69,3 +69,43 @@ def process_article(title: str, body: str) -> dict:
     result = parse_response(response.text)
     result["tags"] = [t for t in result.get("tags", []) if t in VALID_TAGS]
     return result
+
+def get_model() -> str:
+    return os.getenv("GEMINI_MODEL", "gemma-4-26b-a4b-it")
+
+
+def build_analysis_prompt(article: dict) -> str:
+    title    = article.get("title", "")
+    body     = (article.get("body_raw") or "")[:2000]
+    summary  = article.get("summary_ja") or ""
+    cve_ids  = ", ".join(article.get("cve_ids") or []) or "不明"
+    cvss     = article.get("cvss_score") or "不明"
+    severity = article.get("severity") or "不明"
+
+    return f"""あなたはサイバーセキュリティの専門家です。
+以下のセキュリティ情報について、詳細な分析レポートを日本語で作成してください。
+
+## 情報
+- タイトル: {title}
+- CVE: {cve_ids}
+- CVSS: {cvss}
+- 深刻度: {severity}
+- 要約: {summary}
+- 本文: {body}
+
+## 作成してほしいレポートの構成
+
+### 🎯 この脆弱性・インシデントの概要
+（何が問題か、影響を受けるシステムや環境を説明）
+
+### 💀 攻撃者の視点：悪用シナリオ
+（実際にどう悪用されうるか、ステップバイステップで説明。具体的な攻撃手法や悪用例があれば記載）
+
+### 🛡 防御・対策方法
+（具体的な対応策をリストアップ。パッチ適用、設定変更、代替手段など）
+
+### ⚡ 緊急度と対応優先度
+（CVSSスコア等を踏まえた判断基準と推奨アクション）
+
+---
+上記の構成でMarkdown形式の詳細レポートを作成してください。"""

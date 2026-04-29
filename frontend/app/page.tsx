@@ -1,82 +1,63 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import { Article, Tag, Stats } from "./types";
-import ArticleCard from "./components/ArticleCard";
-import { fetchArticles, fetchTags, fetchStats, searchArticles } from "./lib/api";
+import { useEffect, useState, useCallback } from 'react';
+import { Article, Tag, Stats } from './types';
+import ArticleCard from './components/ArticleCard';
+import { fetchArticles, fetchTags, fetchStats, searchArticles } from './lib/api';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:8000';
 
 export default function Home() {
-  const [articles, setArticles] = useState<Article[]>([]);
-  const [tags, setTags] = useState<Tag[]>([]);
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [view, setView] = useState<"all" | "bookmarks">("all");
-
-  const [region,   setRegion]   = useState("");
-  const [tag,      setTag]      = useState("");
-  const [severity, setSeverity] = useState("");
-
-  const [searchQuery, setSearchQuery] = useState("");
-  const [isSearching, setIsSearching]  = useState(false);
-
+  const [articles, setArticles]     = useState<Article[]>([]);
+  const [tags, setTags]             = useState<Tag[]>([]);
+  const [stats, setStats]           = useState<Stats | null>(null);
+  const [total, setTotal]           = useState(0);
+  const [page, setPage]             = useState(1);
+  const [view, setView]             = useState<'all' | 'bookmarks'>('all');
+  const [region, setRegion]         = useState('');
+  const [tag, setTag]               = useState('');
+  const [severity, setSeverity]     = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
 
   const limit = 20;
 
-  useEffect(() => {
-    if (view === "bookmarks") {
-      fetch("http://localhost:8000/bookmarks")
-        .then((r) => r.json())
-        .then((data) => {
-          setArticles(data);
-          setTotal(data.length);
-        });
+  const loadData = useCallback(async () => {
+    if (view === 'bookmarks') {
+      const res  = await fetch(`${API_BASE}/bookmarks`);
+      const data = await res.json();
+      setArticles(data);
+      setTotal(data.length);
     } else if (isSearching && searchQuery) {
-      searchArticles({ q: searchQuery, page, limit }).then((data) => {
-        setArticles(data.articles);
-        setTotal(data.total);
-      });
+      const data = await searchArticles({ q: searchQuery, page, limit });
+      setArticles(data.articles);
+      setTotal(data.total);
     } else {
-      fetchArticles({ region, tag, severity, page, limit }).then((data) => {
-        setArticles(data.articles);
-        setTotal(data.total);
-      });
+      const data = await fetchArticles({ region, tag, severity, page, limit });
+      setArticles(data.articles);
+      setTotal(data.total);
     }
-  }, [region, tag, severity, page, view, isSearching, searchQuery]);
+  }, [view, isSearching, searchQuery, region, tag, severity, page]);
 
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  useEffect(() => {
+    fetchTags().then(setTags);
+    fetchStats().then(setStats);
+  }, []);
 
   const handleBookmark = async (id: number) => {
-    await fetch(`http://localhost:8000/articles/${id}/bookmark`, {
-      method: "POST",
-    });
-    if (view === "bookmarks") {
-      fetch("http://localhost:8000/bookmarks")
-        .then((r) => r.json())
-        .then((data) => {
-          setArticles(data);
-          setTotal(data.length);
-        });
-    } else {
-      fetchArticles({ region, tag, severity, page, limit }).then((data) => {
-        setArticles(data.articles);
-        setTotal(data.total);
-      });
-    }
+    await fetch(`${API_BASE}/articles/${id}/bookmark`, { method: 'POST' });
+    loadData();
   };
 
   const handleExportNotion = async (id: number) => {
-    const res = await fetch(`http://localhost:8000/articles/${id}/export-notion`, {
-      method: "POST",
-    });
+    const res  = await fetch(`${API_BASE}/articles/${id}/export-notion`, { method: 'POST' });
     const data = await res.json();
-    if (data.status === "ok") {
-      alert("Notionに保存しました！");
-    } else {
-      alert("Notionへの保存に失敗しました");
-    }
+    alert(data.status === 'ok' ? 'Notionに保存しました！' : 'Notionへの保存に失敗しました');
   };
-
 
   const totalPages = Math.ceil(total / limit);
 
@@ -85,7 +66,7 @@ export default function Home() {
       {/* ヘッダー */}
       <header className="bg-gray-900 text-white px-6 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <h1 className="text-xl font-bold">🛡 OSINT Aggregator</h1>
+          <h1 className="text-xl font-bold">🛡 DeepMole for OSINT</h1>
           {stats && (
             <div className="text-sm text-gray-400 flex gap-4">
               <span>総記事数: {stats.total_articles}</span>
@@ -105,10 +86,10 @@ export default function Home() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
+              if (e.key === 'Enter') {
                 setIsSearching(searchQuery.length > 0);
                 setPage(1);
-                setView("all");
+                setView('all');
               }
             }}
           />
@@ -117,7 +98,7 @@ export default function Home() {
             onClick={() => {
               setIsSearching(searchQuery.length > 0);
               setPage(1);
-              setView("all");
+              setView('all');
             }}
           >
             検索
@@ -126,7 +107,7 @@ export default function Home() {
             <button
               className="px-4 py-2 text-sm border rounded hover:bg-gray-50"
               onClick={() => {
-                setSearchQuery("");
+                setSearchQuery('');
                 setIsSearching(false);
                 setPage(1);
               }}
@@ -140,28 +121,28 @@ export default function Home() {
         <div className="flex gap-2 mb-4">
           <button
             className={`px-4 py-2 text-sm rounded font-medium ${
-              view === "all"
-                ? "bg-gray-900 text-white"
-                : "bg-white border text-gray-600 hover:bg-gray-50"
+              view === 'all'
+                ? 'bg-gray-900 text-white'
+                : 'bg-white border text-gray-600 hover:bg-gray-50'
             }`}
-            onClick={() => { setView("all"); setPage(1); }}
+            onClick={() => { setView('all'); setPage(1); }}
           >
             すべての記事
           </button>
           <button
             className={`px-4 py-2 text-sm rounded font-medium ${
-              view === "bookmarks"
-                ? "bg-yellow-400 text-black"
-                : "bg-white border text-gray-600 hover:bg-gray-50"
+              view === 'bookmarks'
+                ? 'bg-yellow-400 text-black'
+                : 'bg-white border text-gray-600 hover:bg-gray-50'
             }`}
-            onClick={() => setView("bookmarks")}
+            onClick={() => setView('bookmarks')}
           >
             ★ ブックマーク
           </button>
         </div>
 
         {/* フィルター */}
-        {view === "all" && (
+        {view === 'all' && (
           <div className="bg-white border border-gray-200 rounded-lg p-4 mb-6 flex flex-wrap gap-4">
             <div>
               <label className="text-xs text-gray-500 block mb-1">地域</label>
@@ -225,7 +206,7 @@ export default function Home() {
         </div>
 
         {/* ページネーション */}
-        {view === "all" && totalPages > 1 && (
+        {view === 'all' && totalPages > 1 && (
           <div className="flex justify-center gap-2 mt-8">
             <button
               className="px-4 py-2 text-sm border rounded disabled:opacity-40"

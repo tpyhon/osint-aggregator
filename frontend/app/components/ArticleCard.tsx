@@ -1,14 +1,16 @@
-import { Article } from "../types";
-import SeverityBadge from "./SeverityBadge";
+'use client';
+import { useRouter } from 'next/navigation';
+import { Article } from '../types';
+import SeverityBadge from './SeverityBadge';
 
 const tagColorMap: Record<string, string> = {
-  vulnerability: "bg-red-100 text-red-700",
-  incident:      "bg-orange-100 text-orange-700",
-  malware:       "bg-purple-100 text-purple-700",
-  "new-tech":    "bg-green-100 text-green-700",
-  tool:          "bg-blue-100 text-blue-700",
-  policy:        "bg-indigo-100 text-indigo-700",
-  news:          "bg-gray-100 text-gray-700",
+  vulnerability: 'bg-red-100 text-red-700',
+  incident:      'bg-orange-100 text-orange-700',
+  malware:       'bg-purple-100 text-purple-700',
+  'new-tech':    'bg-green-100 text-green-700',
+  tool:          'bg-blue-100 text-blue-700',
+  policy:        'bg-indigo-100 text-indigo-700',
+  news:          'bg-gray-100 text-gray-700',
 };
 
 export default function ArticleCard({
@@ -20,11 +22,12 @@ export default function ArticleCard({
   onBookmark?: (id: number) => void;
   onExportNotion?: (id: number) => void;
 }) {
-
-  const date = new Date(article.published_at).toLocaleDateString("ja-JP");
+  const router = useRouter();
+  const date = new Date(article.published_at).toLocaleDateString('ja-JP');
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition">
+
       {/* ヘッダー */}
       <div className="flex items-center gap-2 mb-2 flex-wrap">
         <span className="text-xs text-gray-500">{date}</span>
@@ -32,11 +35,11 @@ export default function ArticleCard({
           {article.source_name}
         </span>
         <span className={`text-xs px-2 py-0.5 rounded font-medium ${
-          article.region === "domestic"
-            ? "bg-green-100 text-green-700"
-            : "bg-blue-100 text-blue-700"
+          article.region === 'domestic'
+            ? 'bg-green-100 text-green-700'
+            : 'bg-blue-100 text-blue-700'
         }`}>
-          {article.region === "domestic" ? "国内" : "海外"}
+          {article.region === 'domestic' ? '国内' : '海外'}
         </span>
         <SeverityBadge severity={article.severity} />
         {article.cvss_score && (
@@ -46,16 +49,14 @@ export default function ArticleCard({
         )}
       </div>
 
-      {/* タイトル */}
+      {/* タイトル（クリックで解析ページへ遷移） */}
       <div className="flex items-start justify-between gap-2 mb-2">
-        <a
-          href={article.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-base font-semibold text-gray-900 hover:text-blue-600 leading-snug block"
+        <span
+          onClick={() => router.push(`/articles/${article.id}`)}
+          className="text-base font-semibold text-gray-900 hover:text-blue-600 leading-snug cursor-pointer"
         >
           {article.title}
-        </a>
+        </span>
         <div className="flex gap-2 flex-shrink-0">
           <button
             onClick={() => onExportNotion?.(article.id)}
@@ -68,15 +69,14 @@ export default function ArticleCard({
             onClick={() => onBookmark?.(article.id)}
             className={`text-xl transition ${
               article.is_bookmarked
-                ? "text-yellow-400"
-                : "text-gray-300 hover:text-yellow-400"
+                ? 'text-yellow-400'
+                : 'text-gray-300 hover:text-yellow-400'
             }`}
           >
             ★
           </button>
         </div>
       </div>
-
 
       {/* CVE */}
       {article.cve_ids && article.cve_ids.length > 0 && (
@@ -108,7 +108,7 @@ export default function ArticleCard({
           {article.tags.map((tag) => (
             <span
               key={tag}
-              className={`text-xs px-2 py-0.5 rounded ${tagColorMap[tag] ?? "bg-gray-100 text-gray-600"}`}
+              className={`text-xs px-2 py-0.5 rounded ${tagColorMap[tag] ?? 'bg-gray-100 text-gray-600'}`}
             >
               {tag}
             </span>

@@ -6,12 +6,18 @@ import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'crawler'))
 from notion_exporter import export_to_notion
+from sse_starlette.sse import EventSourceResponse
+from llm_processor import build_analysis_prompt, get_model
+from google import genai
+from dotenv import load_dotenv
+load_dotenv()
+
 
 app = FastAPI(title="OSINT Aggregator API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000","http://100.94.153.88:3000"],
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -335,4 +341,100 @@ def search_articles(
             }
     finally:
         conn.close()
+        
+@app.get("/articles/{article_id}/analysis")
+async def get_analysis(article_id: int):
+    """解析ページ用SSEエンドポイント。キャッシュがあれば即返却、なければLLM生成してDB保存"""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            # キャッシュ確認
+            cur.execute("""
+                SELECT
+                    a.title, a.body_raw, a.url, a.language,
+                    s.summary_ja, s.severity, s.cve_ids, s.cvss_score,
+                    s.analysis_ja, s.analysis_generated_at,
+                    src.name AS source_name, src.region
+                FROM articles a
+                LEFT JOIN summaries s ON a.id = s.article_id
+                JOIN sources src ON a.source_id = src.id
+                WHERE a.id = %s
+            """, (article_id,))
+            row = cur.fetchone()
+            if not row:
+                async def not_found():
+                    yield {"data": "❌ 記事が見つかりません"}
+                    yield {"event": "done", "data": ""}
+                return EventSourceResponse(not_found())
+
+            cols = [d[0] for d in cur.description]
+            article = dict(zip(cols, row))
+    finally:
+        conn.close()
+
+    # キャッシュが存在する場合はそのまま返す
+    if article.get("analysis_ja"):
+        async def from_cache():
+            # キャッシュを500文字ずつ分割して送信（ストリーミング風に見せる）
+            text = article["analysis_ja"]
+            chunk_size = 500
+            for i in range(0, len(text), chunk_size):
+                yield {"data": text[i:i + chunk_size]}
+            yield {"data": "\n\n---\n📄 [原文を読む](" + article["url"] + ")"}
+            yield {"event": "done", "data": ""}
+        return EventSourceResponse(from_cache())
+
+    # キャッシュなし → LLMで生成してDBに保存
+    async def generate_and_save():
+        try:
+            prompt = build_analysis_prompt(article)
+            client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+            model = get_model()
+
+            full_text = ""
+            response = client.models.generate_content_stream(
+                model=model,
+                contents=prompt,
+            )
+            for chunk in response:
+                if chunk.text:
+                    full_text += chunk.text
+                    yield {"data": chunk.text}
+
+            # 原文リンクを末尾に追加
+            footer = f"\n\n---\n📄 [原文を読む]({article['url']})"
+            full_text += footer
+            yield {"data": footer}
+
+            # DB に保存（次回以降はキャッシュから返す）
+            save_conn = get_connection()
+            try:
+                with save_conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE summaries
+                        SET analysis_ja = %s,
+                            analysis_generated_at = NOW()
+                        WHERE article_id = %s
+                    """, (full_text, article_id))
+                    # summariesが存在しない場合（未処理記事）はINSERT
+                    if cur.rowcount == 0:
+                        cur.execute("""
+                            INSERT INTO summaries
+                                (article_id, analysis_ja, analysis_generated_at, llm_model, processed_at)
+                            VALUES (%s, %s, NOW(), %s, NOW())
+                            ON CONFLICT (article_id) DO UPDATE
+                            SET analysis_ja = EXCLUDED.analysis_ja,
+                                analysis_generated_at = EXCLUDED.analysis_generated_at
+                        """, (article_id, full_text, model))
+                save_conn.commit()
+            finally:
+                save_conn.close()
+
+            yield {"event": "done", "data": ""}
+
+        except Exception as e:
+            yield {"event": "error", "data": str(e)}
+
+    return EventSourceResponse(generate_and_save())
+
 
