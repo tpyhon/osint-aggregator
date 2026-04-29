@@ -110,6 +110,6 @@ def summarize_all(limit=10):
             print(f"[ERROR] article_id={article['id']}: {e}")
             time.sleep(5)
 
-    notify_summary(new_critical)
+    notify_summary(new_critical,0)
     print(f"[完了] 成功={success} 失敗={failed}")
 
