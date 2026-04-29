@@ -1,4 +1,4 @@
-# 🛡 OSINT Aggregator
+# 🛡 DeepMole for OSINT
 
 セキュリティ情報を自動収集・要約・分類するOSINTツールです。
 国内外のセキュリティニュース・脆弱性情報をRSSとAPIで収集し、LLMで日本語要約・タグ付けして一覧表示します。
