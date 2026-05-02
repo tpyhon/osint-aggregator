@@ -27,8 +27,6 @@
 
 ## ディレクトリ構成
 
-## ディレクトリ構成
-
 ```
 osint-aggregator/
 ├── crawler/
