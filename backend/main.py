@@ -1,9 +1,10 @@
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query , Query , HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 from db import get_connection
 import sys
 import os
+import jwt
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'crawler'))
 from notion_exporter import export_to_notion
 from sse_starlette.sse import EventSourceResponse
@@ -21,6 +22,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ──────────────────────────────────────────
+# 認証ヘルパー
+# ──────────────────────────────────────────
+def get_user_id(authorization: str) -> str:
+    """
+    AuthorizationヘッダーからSupabase JWTを検証し user_id(UUID)を返す。
+    失敗時は HTTPException 401 を送出。
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="認証が必要です")
+    token = authorization.split(" ", 1)[1]
+    try:
+        secret = os.getenv("SUPABASE_JWT_SECRET", "")
+        payload = jwt.decode(
+            token,
+            secret,
+            algorithms=["HS256"],
+            options={"verify_aud": False},  # Supabaseは audience を "authenticated" に設定
+        )
+        return payload["sub"]  # SupabaseのユーザーID (UUID)
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="トークンの有効期限が切れています")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="無効なトークンです")
+
 
 @app.get("/articles")
 def get_articles(
@@ -174,27 +201,57 @@ def get_stats():
 
 
 @app.post("/articles/{article_id}/bookmark")
-def toggle_bookmark(article_id: int):
+def toggle_bookmark(
+    article_id: int,
+    authorization: str = Header(default=None),
+):
+    """
+    ユーザーごとのブックマーク切り替え。
+    未ログイン時は 401。
+    """
+    user_id = get_user_id(authorization)
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute("""
-                UPDATE articles
-                SET is_bookmarked = NOT is_bookmarked
-                WHERE id = %s
-                RETURNING is_bookmarked
-            """, (article_id,))
-            result = cur.fetchone()
+            # 記事の存在確認
+            cur.execute("SELECT id FROM articles WHERE id = %s", (article_id,))
+            if not cur.fetchone():
+                raise HTTPException(status_code=404, detail="記事が見つかりません")
+
+            # すでにブックマーク済みか確認
+            cur.execute(
+                "SELECT id FROM user_bookmarks WHERE user_id = %s AND article_id = %s",
+                (user_id, article_id),
+            )
+            existing = cur.fetchone()
+
+            if existing:
+                # 登録済み → 削除（トグルOFF）
+                cur.execute(
+                    "DELETE FROM user_bookmarks WHERE user_id = %s AND article_id = %s",
+                    (user_id, article_id),
+                )
+                is_bookmarked = False
+            else:
+                # 未登録 → 追加（トグルON）
+                cur.execute(
+                    "INSERT INTO user_bookmarks (user_id, article_id) VALUES (%s, %s)",
+                    (user_id, article_id),
+                )
+                is_bookmarked = True
+
             conn.commit()
-            if not result:
-                return {"error": "記事が見つかりません"}
-            return {"is_bookmarked": result[0]}
+            return {"is_bookmarked": is_bookmarked}
     finally:
         conn.close()
 
 
 @app.get("/bookmarks")
-def get_bookmarks():
+def get_bookmarks(authorization: str = Header(default=None)):
+    """
+    ログインユーザーのブックマーク一覧を返す。
+    """
+    user_id = get_user_id(authorization)
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -202,29 +259,84 @@ def get_bookmarks():
                 SELECT
                     a.id, a.title, a.url, a.published_at,
                     a.is_processed,
-                    a.is_bookmarked,
+                    TRUE AS is_bookmarked,   -- ブックマーク一覧なので常にtrue
                     s_src.name AS source_name,
                     s_src.region AS region,
                     s.summary_ja, s.severity, s.cve_ids, s.cvss_score,
                     ARRAY_AGG(DISTINCT t.slug) FILTER (WHERE t.slug IS NOT NULL) AS tags
-                FROM articles a
+                FROM user_bookmarks ub
+                JOIN articles a ON ub.article_id = a.id
                 LEFT JOIN summaries s ON a.id = s.article_id
                 JOIN sources s_src ON a.source_id = s_src.id
                 LEFT JOIN article_tags at ON a.id = at.article_id
                 LEFT JOIN tags t ON at.tag_id = t.id
-                WHERE a.is_bookmarked = TRUE
+                WHERE ub.user_id = %s
                 GROUP BY
-                    a.id, a.title, a.url, a.published_at, a.is_processed, a.is_bookmarked,
+                    a.id, a.title, a.url, a.published_at, a.is_processed,
                     s_src.name, s_src.region,
                     s.summary_ja, s.severity, s.cve_ids, s.cvss_score
                 ORDER BY a.published_at DESC
-            """)
+            """, (user_id,))
             columns = [desc[0] for desc in cur.description]
             rows = [dict(zip(columns, row)) for row in cur.fetchall()]
             for row in rows:
                 if row.get("published_at"):
                     row["published_at"] = row["published_at"].isoformat()
             return rows
+    finally:
+        conn.close()
+
+@app.get("/articles/{article_id}/is_bookmarked")
+def check_bookmark(
+    article_id: int,
+    authorization: str = Header(default=None),
+):
+    """
+    記事一覧表示時に各記事のブックマーク状態を返す軽量エンドポイント。
+    未ログイン時は常に False を返す（エラーにしない）。
+    """
+    if not authorization:
+        return {"is_bookmarked": False}
+    try:
+        user_id = get_user_id(authorization)
+    except HTTPException:
+        return {"is_bookmarked": False}
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM user_bookmarks WHERE user_id = %s AND article_id = %s",
+                (user_id, article_id),
+            )
+            return {"is_bookmarked": cur.fetchone() is not None}
+    finally:
+        conn.close()
+
+
+@app.get("/bookmarks/ids")
+def get_bookmark_ids(authorization: str = Header(default=None)):
+    """
+    フロントエンドが記事一覧のブックマーク表示に使う、
+    ブックマーク済み article_id の配列を返す。
+    N+1を避けるため、一括取得用に用意。
+    """
+    if not authorization:
+        return {"ids": []}
+    try:
+        user_id = get_user_id(authorization)
+    except HTTPException:
+        return {"ids": []}
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT article_id FROM user_bookmarks WHERE user_id = %s",
+                (user_id,),
+            )
+            ids = [row[0] for row in cur.fetchall()]
+            return {"ids": ids}
     finally:
         conn.close()
 

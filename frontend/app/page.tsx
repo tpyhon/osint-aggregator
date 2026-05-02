@@ -1,9 +1,14 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Article, Tag, Stats } from './types';
+import { Article, Tag, Stats, User } from './types';          // ← User を追加
 import ArticleCard from './components/ArticleCard';
-import { fetchArticles, fetchTags, fetchStats, searchArticles } from './lib/api';
+import AuthButton from './components/AuthButton';              // ← 追加
+import { supabase } from './lib/supabase';                     // ← 追加
+import {
+  fetchArticles, fetchTags, fetchStats, searchArticles,
+  toggleBookmark, fetchBookmarks, fetchBookmarkIds,            // ← 追加
+} from './lib/api';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:8000';
 
@@ -19,13 +24,39 @@ export default function Home() {
   const [severity, setSeverity]     = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const [user, setUser]                 = useState<User | null>(null);
+  const [bookmarkIds, setBookmarkIds]   = useState<Set<number>>(new Set());
 
   const limit = 20;
 
+  // ──────────────────────────────────────────
+  // 認証状態の初期化・監視
+  // ──────────────────────────────────────────
+  const refreshAuth = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user) {
+      setUser({ id: session.user.id, email: session.user.email });
+      // ブックマーク済みIDを一括取得
+      const ids = await fetchBookmarkIds();
+      setBookmarkIds(new Set(ids));
+    } else {
+      setUser(null);
+      setBookmarkIds(new Set());
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshAuth();
+    // セッション変化を監視
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      refreshAuth();
+    });
+    return () => subscription.unsubscribe();
+  }, [refreshAuth]);
+
   const loadData = useCallback(async () => {
     if (view === 'bookmarks') {
-      const res  = await fetch(`${API_BASE}/bookmarks`);
-      const data = await res.json();
+      const data = await fetchBookmarks();
       setArticles(data);
       setTotal(data.length);
     } else if (isSearching && searchQuery) {
@@ -48,9 +79,27 @@ export default function Home() {
     fetchStats().then(setStats);
   }, []);
 
+  // ──────────────────────────────────────────
+  // ブックマーク切り替え（認証対応版）
+  // ──────────────────────────────────────────
   const handleBookmark = async (id: number) => {
-    await fetch(`${API_BASE}/articles/${id}/bookmark`, { method: 'POST' });
-    loadData();
+    if (!user) {
+      alert('ブックマークにはログインが必要です');
+      return;
+    }
+    try {
+      const result = await toggleBookmark(id);
+      // ローカルのbookmarkIdsを楽観的更新
+      setBookmarkIds((prev) => {
+        const next = new Set(prev);
+        result.is_bookmarked ? next.add(id) : next.delete(id);
+        return next;
+      });
+      // ブックマーク一覧表示中は再読み込み
+      if (view === 'bookmarks') loadData();
+    } catch {
+      alert('ログインが必要です');
+    }
   };
 
   const handleExportNotion = async (id: number) => {
@@ -67,17 +116,22 @@ export default function Home() {
       <header className="bg-gray-900 text-white px-6 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <h1 className="text-xl font-bold">🛡 DeepMole for OSINT</h1>
-          {stats && (
-            <div className="text-sm text-gray-400 flex gap-4">
-              <span>総記事数: {stats.total_articles}</span>
-              <span>要約済み: {stats.processed}</span>
-            </div>
-          )}
+          <div className="flex items-center gap-4">
+            {stats && (
+              <div className="text-sm text-gray-400 flex gap-4">
+                <span>総記事数: {stats.total_articles}</span>
+                <span>要約済み: {stats.processed}</span>
+              </div>
+            )}
+            {/* ↓↓↓ AuthButton を追加 ↓↓↓ */}
+            <AuthButton user={user} onAuthChange={refreshAuth} />
+          </div>
         </div>
       </header>
 
+      {/* ── 以下は既存コードのまま維持 ── */}
       <div className="max-w-6xl mx-auto px-4 py-6">
-        {/* 検索バー */}
+        {/* 検索バー（変更なし） */}
         <div className="flex gap-2 mb-4">
           <input
             type="text"
@@ -95,35 +149,25 @@ export default function Home() {
           />
           <button
             className="px-4 py-2 text-sm bg-gray-900 text-white rounded hover:bg-gray-700"
-            onClick={() => {
-              setIsSearching(searchQuery.length > 0);
-              setPage(1);
-              setView('all');
-            }}
+            onClick={() => { setIsSearching(searchQuery.length > 0); setPage(1); setView('all'); }}
           >
             検索
           </button>
           {isSearching && (
             <button
               className="px-4 py-2 text-sm border rounded hover:bg-gray-50"
-              onClick={() => {
-                setSearchQuery('');
-                setIsSearching(false);
-                setPage(1);
-              }}
+              onClick={() => { setSearchQuery(''); setIsSearching(false); setPage(1); }}
             >
               クリア
             </button>
           )}
         </div>
 
-        {/* ビュー切り替え */}
+        {/* ビュー切り替え（変更なし） */}
         <div className="flex gap-2 mb-4">
           <button
             className={`px-4 py-2 text-sm rounded font-medium ${
-              view === 'all'
-                ? 'bg-gray-900 text-white'
-                : 'bg-white border text-gray-600 hover:bg-gray-50'
+              view === 'all' ? 'bg-gray-900 text-white' : 'bg-white border text-gray-600 hover:bg-gray-50'
             }`}
             onClick={() => { setView('all'); setPage(1); }}
           >
@@ -131,26 +175,21 @@ export default function Home() {
           </button>
           <button
             className={`px-4 py-2 text-sm rounded font-medium ${
-              view === 'bookmarks'
-                ? 'bg-yellow-400 text-black'
-                : 'bg-white border text-gray-600 hover:bg-gray-50'
+              view === 'bookmarks' ? 'bg-yellow-400 text-black' : 'bg-white border text-gray-600 hover:bg-gray-50'
             }`}
             onClick={() => setView('bookmarks')}
           >
-            ★ ブックマーク
+            ★ ブックマーク{!user && <span className="ml-1 text-xs text-gray-400">（要ログイン）</span>}
           </button>
         </div>
 
-        {/* フィルター */}
+        {/* フィルター（変更なし） */}
         {view === 'all' && (
           <div className="bg-white border border-gray-200 rounded-lg p-4 mb-6 flex flex-wrap gap-4">
             <div>
               <label className="text-xs text-gray-500 block mb-1">地域</label>
-              <select
-                className="text-sm border rounded px-2 py-1"
-                value={region}
-                onChange={(e) => { setRegion(e.target.value); setPage(1); }}
-              >
+              <select className="text-sm border rounded px-2 py-1" value={region}
+                onChange={(e) => { setRegion(e.target.value); setPage(1); }}>
                 <option value="">すべて</option>
                 <option value="domestic">国内</option>
                 <option value="international">海外</option>
@@ -158,24 +197,16 @@ export default function Home() {
             </div>
             <div>
               <label className="text-xs text-gray-500 block mb-1">タグ</label>
-              <select
-                className="text-sm border rounded px-2 py-1"
-                value={tag}
-                onChange={(e) => { setTag(e.target.value); setPage(1); }}
-              >
+              <select className="text-sm border rounded px-2 py-1" value={tag}
+                onChange={(e) => { setTag(e.target.value); setPage(1); }}>
                 <option value="">すべて</option>
-                {tags.map((t) => (
-                  <option key={t.slug} value={t.slug}>{t.name}</option>
-                ))}
+                {tags.map((t) => <option key={t.slug} value={t.slug}>{t.name}</option>)}
               </select>
             </div>
             <div>
               <label className="text-xs text-gray-500 block mb-1">深刻度</label>
-              <select
-                className="text-sm border rounded px-2 py-1"
-                value={severity}
-                onChange={(e) => { setSeverity(e.target.value); setPage(1); }}
-              >
+              <select className="text-sm border rounded px-2 py-1" value={severity}
+                onChange={(e) => { setSeverity(e.target.value); setPage(1); }}>
                 <option value="">すべて</option>
                 <option value="critical">Critical</option>
                 <option value="high">High</option>
@@ -191,6 +222,7 @@ export default function Home() {
         )}
 
         {/* 記事一覧 */}
+        {/* ↓↓↓ is_bookmarked を bookmarkIds から動的に解決 ↓↓↓ */}
         <div className="flex flex-col gap-4">
           {articles.length === 0 && (
             <p className="text-center text-gray-400 py-12">記事がありません</p>
@@ -198,33 +230,21 @@ export default function Home() {
           {articles.map((article) => (
             <ArticleCard
               key={article.id}
-              article={article}
+              article={{ ...article, is_bookmarked: bookmarkIds.has(article.id) }}
               onBookmark={handleBookmark}
               onExportNotion={handleExportNotion}
             />
           ))}
         </div>
 
-        {/* ページネーション */}
+        {/* ページネーション（変更なし） */}
         {view === 'all' && totalPages > 1 && (
           <div className="flex justify-center gap-2 mt-8">
-            <button
-              className="px-4 py-2 text-sm border rounded disabled:opacity-40"
-              onClick={() => setPage((p) => p - 1)}
-              disabled={page === 1}
-            >
-              前へ
-            </button>
-            <span className="px-4 py-2 text-sm">
-              {page} / {totalPages}
-            </span>
-            <button
-              className="px-4 py-2 text-sm border rounded disabled:opacity-40"
-              onClick={() => setPage((p) => p + 1)}
-              disabled={page === totalPages}
-            >
-              次へ
-            </button>
+            <button className="px-4 py-2 text-sm border rounded disabled:opacity-40"
+              onClick={() => setPage((p) => p - 1)} disabled={page === 1}>前へ</button>
+            <span className="px-4 py-2 text-sm">{page} / {totalPages}</span>
+            <button className="px-4 py-2 text-sm border rounded disabled:opacity-40"
+              onClick={() => setPage((p) => p + 1)} disabled={page === totalPages}>次へ</button>
           </div>
         )}
       </div>

@@ -31,3 +31,7 @@ export type Stats = {
   severity_counts: Record<string, number>;
 };
 
+export type User = {
+  id: string;
+  email: string | undefined;
+};
