@@ -27,26 +27,36 @@ app.add_middleware(
 # 認証ヘルパー
 # ──────────────────────────────────────────
 def get_user_id(authorization: str) -> str:
-    """
-    AuthorizationヘッダーからSupabase JWTを検証し user_id(UUID)を返す。
-    失敗時は HTTPException 401 を送出。
-    """
+    auth_required = os.getenv("AUTH_REQUIRED", "false").lower() == "true"
+    if not auth_required:
+        return LOCAL_USER_ID
+
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="認証が必要です")
+    
     token = authorization.split(" ", 1)[1]
     try:
         secret = os.getenv("SUPABASE_JWT_SECRET", "")
+        
+        # ★デバッグ用：検証なしでデコードしてpayloadを確認
+        import logging
+        unverified = jwt.decode(token, options={"verify_signature": False})
+        logging.warning(f"JWT payload (unverified): {unverified}")
+        logging.warning(f"JWT secret length: {len(secret)}")
+        
         payload = jwt.decode(
             token,
             secret,
             algorithms=["HS256"],
-            options={"verify_aud": False},  # Supabaseは audience を "authenticated" に設定
+            options={"verify_aud": False},
         )
-        return payload["sub"]  # SupabaseのユーザーID (UUID)
+        return payload["sub"]
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="トークンの有効期限が切れています")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="無効なトークンです")
+    except jwt.InvalidTokenError as e:
+        logging.warning(f"JWT error: {e}")   # ★エラー詳細をログに出力
+        raise HTTPException(status_code=401, detail=f"無効なトークンです: {str(e)}")
+
 
 
 @app.get("/articles")
