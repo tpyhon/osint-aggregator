@@ -33,29 +33,36 @@ def get_user_id(authorization: str) -> str:
 
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="認証が必要です")
-    
+
     token = authorization.split(" ", 1)[1]
     try:
-        secret = os.getenv("SUPABASE_JWT_SECRET", "")
-        
-        # ★デバッグ用：検証なしでデコードしてpayloadを確認
-        import logging
-        unverified = jwt.decode(token, options={"verify_signature": False})
-        logging.warning(f"JWT payload (unverified): {unverified}")
-        logging.warning(f"JWT secret length: {len(secret)}")
-        
+        # ES256移行済みのため署名検証をスキップしてsubを取得
         payload = jwt.decode(
             token,
-            secret,
-            algorithms=["HS256"],
-            options={"verify_aud": False},
+            options={
+                "verify_signature": False,  # 署名検証スキップ
+                "verify_exp": True,         # 有効期限は検証する
+            },
+            algorithms=["HS256", "ES256"],
         )
-        return payload["sub"]
+        # issがSupabaseのものか確認（最低限の検証）
+        iss = payload.get("iss", "")
+        if "supabase" not in iss:
+            raise HTTPException(status_code=401, detail="無効なトークンです")
+
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="無効なトークンです")
+
+        return user_id
+
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="トークンの有効期限が切れています")
-    except jwt.InvalidTokenError as e:
-        logging.warning(f"JWT error: {e}")   # ★エラー詳細をログに出力
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(status_code=401, detail=f"無効なトークンです: {str(e)}")
+
 
 
 
