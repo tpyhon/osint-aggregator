@@ -2,8 +2,8 @@ name: OSINT Crawler
 
 on:
   schedule:
-    - cron: '0 */12 * * *'  # 12時間ごと（UTC）
-  workflow_dispatch:          # 手動実行も可能
+    - cron: '0 */12 * * *'
+  workflow_dispatch:
 
 jobs:
   crawl:
@@ -42,7 +42,9 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install -r crawler/requirements.txt
+        run: |
+          pip install -r crawler/requirements.txt
+          pip install google-genai
 
       - name: Run summarizer
         env:
