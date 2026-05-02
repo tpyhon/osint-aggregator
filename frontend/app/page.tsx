@@ -32,17 +32,20 @@ export default function Home() {
   // ──────────────────────────────────────────
   // 認証状態の初期化・監視
   // ──────────────────────────────────────────
+  const [authLoading, setAuthLoading] = useState(true);  // ← 追加
+
   const refreshAuth = useCallback(async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.user) {
-      setUser({ id: session.user.id, email: session.user.email });
-      // ブックマーク済みIDを一括取得
-      const ids = await fetchBookmarkIds();
-      setBookmarkIds(new Set(ids));
-    } else {
-      setUser(null);
-      setBookmarkIds(new Set());
-    }
+  setAuthLoading(true);   // ← 追加
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.user) {
+    setUser({ id: session.user.id, email: session.user.email });
+    const ids = await fetchBookmarkIds();
+    setBookmarkIds(new Set(ids));
+  } else {
+    setUser(null);
+    setBookmarkIds(new Set());
+  }
+  setAuthLoading(false);  // ← 追加
   }, []);
 
   useEffect(() => {
@@ -83,6 +86,7 @@ export default function Home() {
   // ブックマーク切り替え（認証対応版）
   // ──────────────────────────────────────────
   const handleBookmark = async (id: number) => {
+    if (authLoading) return;
     if (!user) {
       alert('ブックマークにはログインが必要です');
       return;
