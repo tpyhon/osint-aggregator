@@ -1,0 +1,5 @@
+# プロジェクトルートで実行
+echo "3.11.9" > .python-version
+git add .python-version
+git commit -m "Pin Python version to 3.11.9 for Render"
+git push
