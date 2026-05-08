@@ -1,62 +1,11 @@
 import os
 import json
-import httpx
+from google import genai
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── OpenRouter設定 ──────────────────────────────────────────────
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_URL     = "https://openrouter.ai/api/v1/chat/completions"
-OPENROUTER_MODEL   = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free")
-
-# ── 後方互換：既存コードが get_model() を呼ぶ場合に備える ──────
-def get_model() -> str:
-    return OPENROUTER_MODEL
-
-# ── 共通LLM呼び出し（同期） ─────────────────────────────────────
-def _call_llm(prompt: str) -> str:
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type":  "application/json",
-        "HTTP-Referer":  "https://osint-aggregator-tpyhons-projects.vercel.app",
-        "X-Title":       "DeepMole OSINT Aggregator",
-    }
-    payload = {
-        "model":    OPENROUTER_MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-    }
-    response = httpx.post(
-        OPENROUTER_URL,
-        headers=headers,
-        json=payload,
-        timeout=120,
-    )
-    response.raise_for_status()
-    return response.json()["choices"][0]["message"]["content"]
-
-# ── 共通LLM呼び出し（非同期・SSE用） ────────────────────────────
-async def _call_llm_async(prompt: str) -> str:
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type":  "application/json",
-        "HTTP-Referer":  "https://osint-aggregator-tpyhons-projects.vercel.app",
-        "X-Title":       "DeepMole OSINT Aggregator",
-    }
-    payload = {
-        "model":    OPENROUTER_MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-    }
-    async with httpx.AsyncClient(timeout=120) as client:
-        response = await client.post(
-            OPENROUTER_URL,
-            headers=headers,
-            json=payload,
-        )
-        response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"]
-
-# ── 以下は既存コードと完全互換 ────────────────────────────────────
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 VALID_TAGS = [
     "vulnerability",
@@ -113,10 +62,16 @@ def parse_response(text: str) -> dict:
 
 def process_article(title: str, body: str) -> dict:
     prompt = build_prompt(title, body)
-    text   = _call_llm(prompt)
-    result = parse_response(text)
+    response = client.models.generate_content(
+        model=os.getenv("GEMINI_MODEL", "gemma-4-26b-a4b-it"),
+        contents=prompt
+    )
+    result = parse_response(response.text)
     result["tags"] = [t for t in result.get("tags", []) if t in VALID_TAGS]
     return result
+
+def get_model() -> str:
+    return os.getenv("GEMINI_MODEL", "gemma-4-26b-a4b-it")
 
 def build_analysis_prompt(article: dict) -> str:
     title    = article.get("title", "")
