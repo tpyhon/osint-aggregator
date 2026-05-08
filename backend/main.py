@@ -9,7 +9,6 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'crawler'))
 from notion_exporter import export_to_notion
 from sse_starlette.sse import EventSourceResponse
 from llm_processor import build_analysis_prompt, get_model
-from google import genai
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -514,21 +513,19 @@ async def get_analysis(article_id: int):
         return EventSourceResponse(from_cache())
 
     # キャッシュなし → LLMで生成してDBに保存
+    # キャッシュなし → LLMで生成してDBに保存
     async def generate_and_save():
         try:
             prompt = build_analysis_prompt(article)
-            client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
             model = get_model()
 
-            full_text = ""
-            response = client.models.generate_content_stream(
-                model=model,
-                contents=prompt,
-            )
-            for chunk in response:
-                if chunk.text:
-                    full_text += chunk.text
-                    yield {"data": chunk.text}
+            full_text = await _call_llm_async(prompt)
+
+            # 500文字ずつチャンク送信（ストリーミング風）
+            chunk_size = 500
+            for i in range(0, len(full_text), chunk_size):
+                yield {"data": full_text[i:i + chunk_size]}
+
 
             # 原文リンクを末尾に追加
             footer = f"\n\n---\n📄 [原文を読む]({article['url']})"
