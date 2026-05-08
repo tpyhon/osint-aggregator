@@ -8,7 +8,7 @@ import jwt
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'crawler'))
 from notion_exporter import export_to_notion
 from sse_starlette.sse import EventSourceResponse
-from llm_processor import build_analysis_prompt, get_model
+from llm_processor import build_analysis_prompt, get_model, _call_llm_async
 from dotenv import load_dotenv
 load_dotenv()
 
