@@ -57,3 +57,30 @@ jobs:
         run: |
           cd crawler
           python summarize_all.py
+  analyze:
+    runs-on: ubuntu-latest
+    needs: summarize
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r crawler/requirements.txt
+          pip install google-genai
+
+      - name: Run analyzer
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          cd crawler
+          python analyze_all.py
